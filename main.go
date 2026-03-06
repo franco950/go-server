@@ -14,9 +14,9 @@ import (
 )
 
 type dbStore interface {
-	dbMilkById(id string) (*milk, error)
-	dbAllMilk() ([]milk, error)
-	dbSendMilk(m milk) (int64, error)
+	MilkById(id string) (*milk, error)
+	AllMilk() ([]milk, error)
+	SendMilk(m milk) (int64, error)
 }
 type App struct {
 	store dbStore
@@ -39,7 +39,7 @@ func (m milk) isValid() bool {
 	return m.CowID != "" && m.Fat > 0 && m.Protein > 0 && m.PH > 0 && m.SCC > 0
 }
 
-func (db *MySQLdb) dbMilkById(id string) (*milk, error) {
+func (db *MySQLdb) MilkById(id string) (*milk, error) {
 	var cow milk
 	row := db.QueryRow("SELECT cowid, fat, protein, pH, scc FROM milk WHERE cowid=?", id)
 
@@ -53,7 +53,7 @@ func (db *MySQLdb) dbMilkById(id string) (*milk, error) {
 	return &cow, nil
 
 }
-func (db *MySQLdb) dbAllMilk() ([]milk, error) {
+func (db *MySQLdb) AllMilk() ([]milk, error) {
 	var cows []milk
 	rows, err := db.Query("SELECT cowid, fat, protein, pH, scc FROM milk")
 	if err != nil {
@@ -71,7 +71,7 @@ func (db *MySQLdb) dbAllMilk() ([]milk, error) {
 	return cows, nil
 
 }
-func (db *MySQLdb) dbSendMilk(m milk) (int64, error) {
+func (db *MySQLdb) SendMilk(m milk) (int64, error) {
 	row, err := db.Exec("INSERT INTO milk (cowid, fat, protein, pH, scc) VALUES (?,?,?,?,?)",
 		m.CowID, m.Fat, m.Protein, m.PH, m.SCC)
 
@@ -90,7 +90,7 @@ func (db *MySQLdb) dbSendMilk(m milk) (int64, error) {
 func (a *App) milkById(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	w.Header().Set("Content-Type", "application/json")
-	cow, dbErr := a.store.dbMilkById(id)
+	cow, dbErr := a.store.MilkById(id)
 
 	if dbErr == ErrNotFound {
 		w.WriteHeader(http.StatusNotFound)
@@ -109,7 +109,7 @@ func (a *App) milkById(w http.ResponseWriter, r *http.Request) {
 }
 func (a *App) allMilk(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
-	milks, err := a.store.dbAllMilk()
+	milks, err := a.store.AllMilk()
 	if err != nil {
 		log.Println(err)
 		w.WriteHeader(http.StatusInternalServerError)
@@ -135,7 +135,7 @@ func (a *App) sendMilk(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode(map[string]string{"error": "missing or invalid fields"})
 		return
 	}
-	cowid, err := a.store.dbSendMilk(cow)
+	cowid, err := a.store.SendMilk(cow)
 	if err != nil {
 		log.Println(err)
 		w.WriteHeader(http.StatusInternalServerError)
@@ -167,7 +167,7 @@ func MySQLsetup() *MySQLdb {
 	if pingErr != nil {
 		log.Fatal(pingErr)
 	}
-	fmt.Println("connected to database!")
+	fmt.Println("connected to MySQL database!")
 	return sqldb
 
 }
