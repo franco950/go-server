@@ -5,6 +5,8 @@ import (
 	"errors"
 	"log"
 	"net/http"
+	"os"
+	"time"
 
 	"github.com/joho/godotenv"
 )
@@ -75,6 +77,7 @@ func (a *App) sendMilk(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode(map[string]string{"error": "bad request"})
 		return
 	}
+
 	if !cow.isValid() {
 		w.WriteHeader(http.StatusBadRequest)
 		json.NewEncoder(w).Encode(map[string]string{"error": "missing or invalid fields"})
@@ -96,19 +99,68 @@ func home(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode("successfully connected to server")
 }
 
+// middleware
+type writerwrapper struct {
+	http.ResponseWriter
+	status int
+}
+
+func (rw *writerwrapper) WriteHeader(status int) {
+	rw.status = status
+	rw.ResponseWriter.WriteHeader(status)
+}
+func Logger(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/favicon.ico" {
+			return
+		}
+		start := time.Now()
+		rw := &writerwrapper{w, http.StatusOK}
+		next.ServeHTTP(rw, r)
+		log.Printf("%s %s %d %v", r.Method, r.URL.Path, rw.status, time.Since(start))
+	})
+}
+func Authentication(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/favicon.ico" {
+			return
+		}
+		if r.Method == "POST" {
+
+			key := r.Header.Get("X-API-Key")
+			w.Header().Set("Content-Type", "application/json")
+
+			apikey := os.Getenv("API_KEY")
+
+			if key != apikey {
+				w.WriteHeader(http.StatusUnauthorized)
+				json.NewEncoder(w).Encode(map[string]string{"error": "unauthorized"})
+				return
+			}
+		}
+		next.ServeHTTP(w, r)
+
+	})
+}
+
 func main() {
 	err := godotenv.Load()
 	if err != nil {
 		log.Fatal("error loading env variables")
 	}
+	_, ok := os.LookupEnv("API_KEY")
+	if !ok {
+		log.Fatal("no api key in env")
+	}
 	sqldb := MySQLsetup()
 	app := &App{store: sqldb}
 
 	mux := http.NewServeMux()
+
 	mux.HandleFunc("GET /milk", app.allMilk)
 	mux.HandleFunc("GET /", home)
 	mux.HandleFunc("GET /milk/{id}", app.milkById)
 	mux.HandleFunc("POST /milk", app.sendMilk)
-	log.Fatal(http.ListenAndServe(":8080", mux))
+	log.Fatal(http.ListenAndServe(":8080", Logger(Authentication(mux))))
 
 }
