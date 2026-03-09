@@ -7,6 +7,9 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"os/signal"
+	"syscall"
+	"time"
 
 	"github.com/joho/godotenv"
 )
@@ -134,11 +137,38 @@ func main() {
 	app := &App{store: sqldb}
 
 	mux := http.NewServeMux()
-
 	mux.HandleFunc("GET /milk", app.allMilk)
 	mux.HandleFunc("GET /", home)
 	mux.HandleFunc("GET /milk/{id}", app.milkById)
 	mux.HandleFunc("POST /milk", app.sendMilk)
-	log.Fatal(http.ListenAndServe(":8080", Logger(Authentication(TimeKeeper(mux)))))
+
+	srv := &http.Server{
+		Addr:    ":8080",
+		Handler: Logger(Authentication(TimeKeeper(mux))),
+	}
+	//internal errors
+	serverError := make(chan error, 1)
+	go func() {
+		serverError <- srv.ListenAndServe()
+	}()
+	//external errors
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+
+	select {
+	case err := <-serverError:
+		if err != nil && err != http.ErrServerClosed {
+			log.Printf("server error: %v", err)
+		}
+
+	case <-quit:
+		log.Println("shutdown signal received")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := srv.Shutdown(ctx); err != nil {
+		log.Printf("shutdown error: %v", err)
+	}
 
 }
