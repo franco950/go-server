@@ -41,7 +41,7 @@ func Authentication(next http.Handler) http.Handler {
 
 			apikey := os.Getenv("API_KEY")
 
-			if key != apikey {
+			if apikey == "" || key != apikey {
 				w.WriteHeader(http.StatusUnauthorized)
 				json.NewEncoder(w).Encode(map[string]string{"error": "unauthorized"})
 				return
