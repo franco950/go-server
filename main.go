@@ -1,20 +1,20 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"log"
 	"net/http"
 	"os"
-	"time"
 
 	"github.com/joho/godotenv"
 )
 
 type dbStore interface {
-	MilkById(id string) (*milk, error)
-	AllMilk() ([]milk, error)
-	SendMilk(m milk) (int64, error)
+	MilkById(ctx context.Context, id string) (*milk, error)
+	AllMilk(ctx context.Context) ([]milk, error)
+	SendMilk(ctx context.Context, m milk) (int64, error)
 }
 type App struct {
 	store dbStore
@@ -37,7 +37,8 @@ func (m milk) isValid() bool {
 func (a *App) milkById(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	w.Header().Set("Content-Type", "application/json")
-	cow, dbErr := a.store.MilkById(id)
+
+	cow, dbErr := a.store.MilkById(r.Context(), id)
 
 	if dbErr == ErrNotFound {
 		w.WriteHeader(http.StatusNotFound)
@@ -45,8 +46,15 @@ func (a *App) milkById(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if dbErr != nil {
-		w.WriteHeader(http.StatusInternalServerError)
 		log.Println(dbErr)
+		if errors.Is(dbErr, context.DeadlineExceeded) {
+			w.WriteHeader(http.StatusGatewayTimeout)
+			json.NewEncoder(w).Encode(map[string]string{"error": "request timeout"})
+			return
+		}
+
+		w.WriteHeader(http.StatusInternalServerError)
+
 		json.NewEncoder(w).Encode(map[string]string{"error": "internal server error"})
 		return
 	}
@@ -56,9 +64,16 @@ func (a *App) milkById(w http.ResponseWriter, r *http.Request) {
 }
 func (a *App) allMilk(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
-	milks, err := a.store.AllMilk()
+
+	milks, err := a.store.AllMilk(r.Context())
 	if err != nil {
 		log.Println(err)
+		if errors.Is(err, context.DeadlineExceeded) {
+			w.WriteHeader(http.StatusGatewayTimeout)
+			json.NewEncoder(w).Encode(map[string]string{"error": "request timeout"})
+			return
+		}
+
 		w.WriteHeader(http.StatusInternalServerError)
 		json.NewEncoder(w).Encode(map[string]string{"error": "internal server error"})
 		return
@@ -83,9 +98,16 @@ func (a *App) sendMilk(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode(map[string]string{"error": "missing or invalid fields"})
 		return
 	}
-	cowid, err := a.store.SendMilk(cow)
+
+	cowid, err := a.store.SendMilk(r.Context(), cow)
 	if err != nil {
 		log.Println(err)
+		if errors.Is(err, context.DeadlineExceeded) {
+			w.WriteHeader(http.StatusGatewayTimeout)
+			json.NewEncoder(w).Encode(map[string]string{"error": "request timeout"})
+			return
+		}
+
 		w.WriteHeader(http.StatusInternalServerError)
 		json.NewEncoder(w).Encode(map[string]string{"error": "internal server error"})
 		return
@@ -97,50 +119,6 @@ func (a *App) sendMilk(w http.ResponseWriter, r *http.Request) {
 func home(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode("successfully connected to server")
-}
-
-// middleware
-type writerwrapper struct {
-	http.ResponseWriter
-	status int
-}
-
-func (rw *writerwrapper) WriteHeader(status int) {
-	rw.status = status
-	rw.ResponseWriter.WriteHeader(status)
-}
-func Logger(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/favicon.ico" {
-			return
-		}
-		start := time.Now()
-		rw := &writerwrapper{w, http.StatusOK}
-		next.ServeHTTP(rw, r)
-		log.Printf("%s %s %d %v", r.Method, r.URL.Path, rw.status, time.Since(start))
-	})
-}
-func Authentication(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/favicon.ico" {
-			return
-		}
-		if r.Method == "POST" {
-
-			key := r.Header.Get("X-API-Key")
-			w.Header().Set("Content-Type", "application/json")
-
-			apikey := os.Getenv("API_KEY")
-
-			if key != apikey {
-				w.WriteHeader(http.StatusUnauthorized)
-				json.NewEncoder(w).Encode(map[string]string{"error": "unauthorized"})
-				return
-			}
-		}
-		next.ServeHTTP(w, r)
-
-	})
 }
 
 func main() {
@@ -161,6 +139,6 @@ func main() {
 	mux.HandleFunc("GET /", home)
 	mux.HandleFunc("GET /milk/{id}", app.milkById)
 	mux.HandleFunc("POST /milk", app.sendMilk)
-	log.Fatal(http.ListenAndServe(":8080", Logger(Authentication(mux))))
+	log.Fatal(http.ListenAndServe(":8080", Logger(Authentication(TimeKeeper(mux)))))
 
 }
