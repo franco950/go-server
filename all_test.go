@@ -1,10 +1,38 @@
 package main
 
-// All tests for the Milk Quality API:
-//   - isValid() unit tests
-//   - handler tests (allMilk, milkById, sendMilk) via httptest.NewRecorder
-//   - middleware tests (auth, timeout) via httptest.NewServer
+// All tests for the Milk Quality API.
 // No MySQL required — mockStore implements dbStore in memory.
+//
+// UNIT TESTS — pure logic, no HTTP, no DB
+//   TestMilkIsValid                          isValid() returns true for a complete valid struct
+//                                            isValid() returns false for empty CowID
+//                                            isValid() returns false for zero Fat
+//                                            isValid() returns false for negative Protein
+//                                            isValid() returns false for zero PH
+//                                            isValid() returns false for zero SCC
+//
+// HANDLER TESTS — httptest.NewRecorder, no middleware, no network
+//   TestAllMilk_ReturnsSeededData            allMilk returns all records from store
+//   TestAllMilk_EmptyTable_ReturnsEmptySlice allMilk returns 200 on empty store
+//   TestAllMilk_DBError_Returns500           allMilk returns 500 on store error
+//   TestAllMilk_Timeout_Returns504           allMilk returns 504 on context.DeadlineExceeded
+//
+//   TestMilkById_Found_Returns200            milkById returns 200 and correct record
+//   TestMilkById_NotFound_Returns404         milkById returns 404 on ErrNotFound
+//   TestMilkById_DBError_Returns500          milkById returns 500 on store error
+//   TestMilkById_Timeout_Returns504          milkById returns 504 on context.DeadlineExceeded
+//
+//   TestSendMilk_ValidPayload_Returns201     sendMilk returns 201 and passes correct data to store
+//   TestSendMilk_MalformedJSON_Returns400    sendMilk returns 400 on invalid JSON
+//   TestSendMilk_InvalidFields_Returns400    sendMilk returns 400 when isValid() fails
+//   TestSendMilk_DBError_Returns500          sendMilk returns 500 on store error
+//   TestSendMilk_Timeout_Returns504          sendMilk returns 504 on context.DeadlineExceeded
+//
+// MIDDLEWARE TESTS — httptest.NewServer, full Logger+Authentication+TimeKeeper chain
+//   TestAuth_POST_MissingAPIKey_Returns401   POST with no Api-key header returns 401
+//   TestAuth_POST_WrongAPIKey_Returns401     POST with wrong Api-key header returns 401
+//   TestAuth_POST_CorrectAPIKey_Passes       POST with correct Api-key header passes through
+//   TestAuth_GET_NoKeyRequired_Passes        GET requests bypass auth and return 200
 
 import (
 	"context"
